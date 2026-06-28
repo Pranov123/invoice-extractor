@@ -27,42 +27,48 @@ class InvoiceOut(BaseModel):
 
 # ---------------- STRONG AMOUNT EXTRACTION ----------------
 def extract_amount(text: str):
+    import re
 
-    # STEP 1: find all numbers
-    numbers = [(m.group(), m.start()) for m in re.finditer(r"\d+(\.\d+)?", text)]
+    candidates = []
 
-    if not numbers:
-        return 0.0
+    keywords_positive = ["total", "due", "amount", "payable"]
+    keywords_negative = ["invoice", "id", "ref", "no"]
 
-    # STEP 2: look for keyword positions
-    keywords = ["total", "amount", "due", "invoice", "payable"]
+    text_lower = text.lower()
 
-    keyword_positions = []
-    lower_text = text.lower()
+    for match in re.finditer(r"\d+(\.\d+)?", text):
+        num_str = match.group()
+        pos = match.start()
 
-    for kw in keywords:
-        idx = lower_text.find(kw)
-        if idx != -1:
-            keyword_positions.append(idx)
+        score = 0
 
-    # STEP 3: if keywords exist → pick closest number after them
-    if keyword_positions:
-        best_num = None
-        best_dist = float("inf")
+        # ---- decimal bonus ----
+        if "." in num_str:
+            score += 5
 
-        for num, pos in numbers:
-            for kp in keyword_positions:
-                if pos >= kp:  # number appears after keyword
-                    dist = pos - kp
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_num = num
+        value = float(num_str)
 
-        if best_num:
-            return float(best_num)
+        # ---- penalize large integers (VERY IMPORTANT) ----
+        if "." not in num_str and value >= 1000:
+            score -= 8
 
-    # STEP 4: fallback → last number (NOT first!)
-    return float(numbers[-1][0])
+        # ---- keyword scoring (window-based) ----
+        window = text_lower[max(0, pos-25): pos+25]
+
+        for kw in keywords_positive:
+            if kw in window:
+                score += 10
+
+        for kw in keywords_negative:
+            if kw in window:
+                score -= 10
+
+        candidates.append((score, value))
+
+    # pick highest score
+    candidates.sort(reverse=True, key=lambda x: x[0])
+
+    return candidates[0][1] if candidates else 0.0
 
 
 # ---------------- OTHER FIELDS ----------------
